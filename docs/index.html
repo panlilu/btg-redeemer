@@ -138,6 +138,8 @@
               method: 'POST',
               url: 'https://btgexplorer.com/api/tx/send',
               data: {rawtx: $('#raw').val()}
+            },function(data){
+              alert(JSON.stringify(data));
             })
           }
         })
@@ -148,7 +150,7 @@
 <section class="section">
   <div class="container">
     <h1 class="title">
-        BCC Redeemer
+        BitconGoid Redeemer
     </h1>
     <div class="notification">
         THIS IS AN OPENSOURCE FREE SOFTWARE WITHOUT ANY GUARANTEE！
