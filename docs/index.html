@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>BTG redeemer</title>
+  <script type="text/javascript" src="jquery.min.js"></script>
+  <script type="text/javascript" src="bitcoin.js"></script>
+  <script type="text/javascript" src="bignumber.js"></script>
+  <script type="text/javascript" src="ucsv-1.1.0.js"></script>
+  <link rel="stylesheet" href="bulma.css">
+  <style>
+    .step2{display: none}
+  </style>
+
+  <script>
+      function satoshi_to_coin(satoshi){
+        return satoshi.div(100000000);
+      }
+      window.keypair = null;
+      var unspent = [];
+      var selected_addr = '';
+      var network = bccr.bitcoin.networks['bitcoingold'];
+      function get_unspent() {
+        try {
+          var pk = $('#privatekey_input').val();
+          key_pair = new bccr.bitcoin.ECPair.fromWIF(pk, network);
+          var bitcoin_pair = new bccr.bitcoin.ECPair.fromWIF(pk)
+          key_pair.compressed = false;
+          bitcoin_pair.compressed = false;
+          if ($('#is_compressed').prop("checked")) {
+            key_pair.compressed = true;
+            bitcoin_pair.compressed = true;
+          }
+
+          selected_addr = key_pair.getAddress();
+          bitcoin_addr = bitcoin_pair.getAddress();
+          console.log(selected_addr);
+          $('#addr-label').html('Your btg address: ' + selected_addr + "<br> (Original Bitcoin address: " + bitcoin_addr + ")");
+          $('.step2').show();
+
+          $.get('https://btgexplorer.com/api/addr/'+ selected_addr + '/utxo', function(data){
+            console.log(data);
+            //unspent = JSON.parse(data);
+            unspent = data;
+            console.log(unspent);
+            var total = new BigNumber(0);
+            for(var i=0;i<unspent.length;i++ ){
+              var satoshi = new BigNumber(unspent[i]["amount"]);
+              total = total.plus(satoshi);
+            }
+            // total = total.div(100000000);
+            $('#total').html(total.toString());
+            $('#inputs').val(JSON.stringify(unspent));
+          });
+        } catch (e) {
+          alert('privatekey error');
+        }
+      }
+      function make() {
+        console.log("making...");
+        var selected_unspent = JSON.parse($('#inputs').val());
+        var return_addr = selected_addr;
+        console.log(return_addr);
+        var tx_fee_btc = new BigNumber($('#tx-fee').val());
+        var tx_fee = tx_fee_btc.times(100000000);
+        console.log(network);
+        var tx = new bccr.bitcoin.TransactionBuilder(network);
+        var pubk = key_pair.getPublicKeyBuffer();
+        var spk = bccr.bitcoin.script.pubKey.output.encode(pubk);
+        console.log(spk);
+        var total_inputs = new BigNumber(0);
+        for(var i=0;i<selected_unspent.length;i++ ){
+          console.log(selected_unspent);
+          var txId = selected_unspent[i]["txid"];
+          total_inputs = total_inputs.plus(new BigNumber(selected_unspent[i]["amount"]).times(100000000));
+          console.log(spk);
+          tx.addInput(txId, selected_unspent[i]["vout"]);
+        }
+        var array = CSV.csvToArray($("#csv").val());
+        var outs = new BigNumber(0);
+        for(var i=0;i<array.length;i++ ){
+          console.log(array[i])
+          var btc = new BigNumber(array[i][1]);
+          var satoshi = btc.times(100000000);
+          outs = outs.plus(satoshi);
+          tx.addOutput(array[i][0], satoshi.toNumber());
+        }
+        var returns = total_inputs.minus(outs).minus(tx_fee);
+        console.log(returns.toNumber());
+        if (returns.toNumber() < 0) {
+          throw new Error('balance not enough');
+        }
+        if (returns.toNumber() > 0) {
+          tx.addOutput(return_addr, returns.toNumber());
+        }
+        tx.enableBitcoinGold(true);
+        tx.setVersion(2);
+
+        console.log(outs.toNumber());
+        console.log(tx_fee.toNumber());
+        console.log(returns.toNumber());
+        console.log(key_pair.getAddress());
+        console.log(tx);
+        var hashType = bccr.bitcoin.Transaction.SIGHASH_ALL | bccr.bitcoin.Transaction.SIGHASH_BITCOINCASHBIP143;
+        for(var i=0;i<selected_unspent.length;i++ ){
+          var input_amout = new BigNumber(selected_unspent[i]["amount"]).times(100000000);
+          tx.sign(i, key_pair, null, hashType, input_amout.toNumber());
+        }
+        var tx_build = tx.build();
+        var summary = "";
+        summary += "total outs:" + satoshi_to_coin(outs).toNumber();
+        summary += " | tx_fee:" + satoshi_to_coin(tx_fee).toNumber() +' ('+ tx_fee/tx_build.byteLength() + ' sat/byte)';
+        summary += " | returns:" + satoshi_to_coin(returns).toNumber();
+        $("#summary").html(summary);
+        window.tx_build = tx_build;
+        console.log(tx_build);
+        console.log(tx_build.toHex());
+        $('#raw').val(tx_build.toHex());
+      }
+      $(document).ready(function(){
+        $('#make').click(function(){
+          try {
+            make();
+          } catch (e) {
+            console.log(e);
+            alert('make transactions error, please check your input');
+          }
+        })
+        $('#get_unspent').click(function(){
+          get_unspent();
+        })
+
+        $('#btn-broadcast').click(function(){
+          if (confirm('Are your sure to broadcast the raw transaction?')) {
+            $.ajax({
+              method: 'POST',
+              url: 'https://btgexplorer.com/api/tx/send',
+              data: {rawtx: $('#raw').val()}
+            })
+          }
+        })
+      })
+  </script>
+</head>
+<body>
+<section class="section">
+  <div class="container">
+    <h1 class="title">
+        BCC Redeemer
+    </h1>
+    <div class="notification">
+        THIS IS AN OPENSOURCE FREE SOFTWARE WITHOUT ANY GUARANTEE！
+    </div>
+
+    <div class="field privatekey">
+        <label class="label" for="privatekey_input">PrivateKey WIF</label>
+        <div class="control">
+          <input class="input" type="password" id="privatekey_input" value="">
+        </div>
+      </div>
+      
+    <div class="compress">
+      <input type="checkbox" id="is_compressed">
+      <label for="is_compressed">Compressed</label>
+    </div>
+
+    <button type="button" class="button is-link" name="button" id="get_unspent">verify / get_unspent</button>
+
+    <div class="step2">
+      <div>
+        <div id="addr-label" class="notification"></div>
+      </div>
+      <div>
+        <span>Total:</span><span id="total">0</span> BCD
+      </div>
+
+      <div class="field">
+        <label for="inputs" class="label">Inputs (Json array, insight utxo unspent format)</label>
+        <textarea class="textarea" rows="4" cols="40" id="inputs"></textarea>
+      </div>
+
+
+      <div class="">
+        <label class="label" for="csv">Outputs csv (split with comma, support multiline)</label>
+        <textarea class="textarea"  rows="4" cols="40" id="csv" placeholder="GefTXNK8PLJxXWZS6kFQgEGvoRHTM2tMMK,0.001"></textarea>
+        <button type="button" name="button" id="make"  class="button is-link">Make Transaction</button>
+      </div>
+      <hr>
+        <label class="label" for="tx-fee">Tx fee</label>
+        <input class="input" type="text" id="tx-fee" value="0.0001" style="width:200px"> BCG
+      <hr>
+      <div id="summary">Raw Transaction</div>
+      <textarea class="textarea" rows="8" cols="40" id="raw"></textarea>
+      <button class="button" id="btn-broadcast">Broadcast</button>
+    </div>
+  
+  </div>
+  </section>
+</body>
+</html>
