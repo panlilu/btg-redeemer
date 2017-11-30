@@ -138,8 +138,11 @@
               method: 'POST',
               url: 'https://btgexplorer.com/api/tx/send',
               data: {rawtx: $('#raw').val()}
-            },function(data){
-              alert(JSON.stringify(data));
+            }).done(function(data){
+              $('#result').text(JSON.stringify(data))
+            }).fail(function() {
+              $('#result').text(JSON.stringify(data))
+              alert( "broadcast error" );
             })
           }
         })
@@ -196,6 +199,7 @@
       <div id="summary">Raw Transaction</div>
       <textarea class="textarea" rows="8" cols="40" id="raw"></textarea>
       <button class="button" id="btn-broadcast">Broadcast</button>
+      <div class="notification" id="result"></div>
     </div>
   
   </div>
